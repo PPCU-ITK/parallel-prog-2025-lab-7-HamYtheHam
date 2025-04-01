@@ -104,6 +104,10 @@ int main(){
     const double E0 = p0/(gamma_val - 1.0) + 0.5*rho0*(u0*u0 + v0*v0);
 
     // ----- Initialize grid and obstacle mask -----
+    #pragma omp target data map(to:rho[:total_size], rhou[:total_size], rhov[:total_size], E[:total_size], solid[:total_size]) \
+    map(tofrom:rho_new[:total_size], rhou_new[:total_size], rhov_new[:total_size], E_new[:total_size])
+    {
+        #pragma  omp target teams distribute parallel for collapse(2)
     for (int i = 0; i < Nx+2; i++){
         for (int j = 0; j < Ny+2; j++){
             // Compute cell center coordinates
@@ -126,6 +130,7 @@ int main(){
             }
         }
     }
+}
 
     // ----- Determine time step from CFL condition -----
     double c0 = sqrt(gamma_val * p0 / rho0);
@@ -136,8 +141,9 @@ int main(){
 
     // ----- Main time-stepping loop -----
     for (int n = 0; n < nSteps; n++){
-        // --- Apply boundary conditions on ghost cells ---
+        // --- Apply boundary conditions on ghost cells ---       
         // Left boundary (inflow): fixed free-stream state
+        #pragma  omp target teams distribute parallel for
         for (int j = 0; j < Ny+2; j++){
             rho[0*(Ny+2)+j] = rho0;
             rhou[0*(Ny+2)+j] = rho0*u0;
@@ -145,6 +151,7 @@ int main(){
             E[0*(Ny+2)+j] = E0;
         }
         // Right boundary (outflow): copy from the interior
+        #pragma  omp target teams distribute parallel for
         for (int j = 0; j < Ny+2; j++){
             rho[(Nx+1)*(Ny+2)+j] = rho[Nx*(Ny+2)+j];
             rhou[(Nx+1)*(Ny+2)+j] = rhou[Nx*(Ny+2)+j];
@@ -152,6 +159,7 @@ int main(){
             E[(Nx+1)*(Ny+2)+j] = E[Nx*(Ny+2)+j];
         }
         // Bottom boundary: reflective
+        #pragma  omp target teams distribute parallel for
         for (int i = 0; i < Nx+2; i++){
             rho[i*(Ny+2)+0] = rho[i*(Ny+2)+1];
             rhou[i*(Ny+2)+0] = rhou[i*(Ny+2)+1];
@@ -159,14 +167,17 @@ int main(){
             E[i*(Ny+2)+0] = E[i*(Ny+2)+1];
         }
         // Top boundary: reflective
+        #pragma  omp target teams distribute parallel for
         for (int i = 0; i < Nx+2; i++){
             rho[i*(Ny+2)+(Ny+1)] = rho[i*(Ny+2)+Ny];
             rhou[i*(Ny+2)+(Ny+1)] = rhou[i*(Ny+2)+Ny];
             rhov[i*(Ny+2)+(Ny+1)] = -rhov[i*(Ny+2)+Ny];
             E[i*(Ny+2)+(Ny+1)] = E[i*(Ny+2)+Ny];
         }
+    
 
         // --- Update interior cells using a Lax-Friedrichs scheme ---
+        #pragma omp target teams distribute parallel for collapse(2)
         for (int i = 1; i <= Nx; i++){
             for (int j = 1; j <= Ny; j++){
                 // If the cell is inside the solid obstacle, do not update it
@@ -215,6 +226,7 @@ int main(){
         }
 
         // Copy updated values back
+        #pragma omp target teams distribute parallel for collapse(2)
         for (int i = 1; i <= Nx; i++){
             for (int j = 1; j <= Ny; j++){
                 rho[i*(Ny+2)+j] = rho_new[i*(Ny+2)+j];
@@ -226,6 +238,7 @@ int main(){
 
         // Calculate total kinetic energy
         double total_kinetic = 0.0;
+        #pragma omp target teams distribute parallel for collapse(2) reduction(+:total_kinetic)
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
                 double u = rhou[i*(Ny+2)+j] / rho[i*(Ny+2)+j];
